@@ -54,8 +54,8 @@ jobs:
       - name: Create Admin User and Optimize RDP Visuals
         shell: pwsh
         run: |
-          $user = "Fazah"
-          $passPlain = "Fazah@123"
+          $user = "Jira_zx"
+          $passPlain = "123789"
           $passSecure = ConvertTo-SecureString $passPlain -AsPlainText -Force
 
           if (-not (Get-LocalUser -Name $user -ErrorAction SilentlyContinue)) {
@@ -160,8 +160,8 @@ jobs:
             Start-Process -FilePath "cloudflared.exe" -ArgumentList "tunnel --no-autoupdate run --token $token" -RedirectStandardOutput $logOut -RedirectStandardError $logErr -WindowStyle Hidden
             Write-Host "=================================================="
             Write-Host "[+] CLOUDFLARE TUNNEL : Named Tunnel Active"
-            Write-Host "[+] USERNAME          : Fazah"
-            Write-Host "[+] PASSWORD          : Fazah@123"
+            Write-Host "[+] USERNAME          : Jira_zx"
+            Write-Host "[+] PASSWORD          : 123789"
             Write-Host "[+] DESKTOP SYNC DIR  : C:\Users\Fazah\Desktop\MegaSync"
             Write-Host "[+] MEGA ACCOUNT      : $env:MEGA_EMAIL ($env:MEGA_REMOTE_DIR)"
             Write-Host "=================================================="

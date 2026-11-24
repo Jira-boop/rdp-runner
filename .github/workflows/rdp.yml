@@ -55,7 +55,7 @@ jobs:
         shell: pwsh
         run: |
           $user = "Jira_zx"
-          $passPlain = ""
+          $passPlain = "Jira_12344031!"
           $passSecure = ConvertTo-SecureString $passPlain -AsPlainText -Force
 
           if (-not (Get-LocalUser -Name $user -ErrorAction SilentlyContinue)) {

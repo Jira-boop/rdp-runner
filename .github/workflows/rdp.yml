@@ -54,17 +54,19 @@ jobs:
       - name: Create Admin User and Optimize RDP Visuals
         shell: pwsh
         run: |
-          $user = "Jira_zx"
-          $passPlain = "Jira_12344031!"
-          $passSecure = ConvertTo-SecureString $passPlain -AsPlainText -Force
+         $user = "Jira_zx"
+         $passPlain = "Jira#Rdp2026!"
+         $passSecure = ConvertTo-SecureString -String $passPlain -AsPlainText -Force
 
-          if (-not (Get-LocalUser -Name $user -ErrorAction SilentlyContinue)) {
-            New-LocalUser -Name $user -Password $passSecure -FullName $user -Description "RDP Admin" -PasswordNeverExpires -UserMayNotChangePassword
-          } else {
-            Set-LocalUser -Name $user -Password $passSecure -PasswordNeverExpires $true
-          }
+         if (-not (Get-LocalUser -Name $user -ErrorAction SilentlyContinue)) {
+          New-LocalUser -Name $user -Password $passSecure -FullName $user -Description "RDP Admin" -PasswordNeverExpires -UserMayNotChangePassword
+         } else {
+         Set-LocalUser -Name $user -Password $passSecure -PasswordNeverExpires $true
+         }
 
-          Add-LocalGroupMember -Group "Administrators" -Member $user -ErrorAction SilentlyContinue
+         Add-LocalGroupMember -Group "Administrators" -Member $user -ErrorAction SilentlyContinue
+         Set-ItemProperty -Path "HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\VisualEffects" -Name "VisualFXSetting" -Value 2 -ErrorAction SilentlyContinue
+         Write-Host "[+] User '$user' ready with password '$passPlain'."
 
           # ลดเอฟเฟกต์ภาพเพื่อลดแบนด์วิดท์ขณะรีโมตข้ามโซน
           Set-ItemProperty -Path "HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\VisualEffects" -Name "VisualFXSetting" -Value 2 -ErrorAction SilentlyContinue

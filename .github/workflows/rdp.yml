@@ -1,220 +1,202 @@
-name: Cloud Server Runner (Cloudflare Tunnel)
+name: Cloud Server Runner
 
 on:
   workflow_dispatch:
     inputs:
-      os_type:
-        description: 'Server OS (windows-2022, windows-2025, ubuntu-24.04, ubuntu-gui)'
-        required: false
-        default: 'windows-2022'
-      ram_profile:
-        description: 'Memory Profile (balanced-16gb, high-swap-24gb)'
-        required: false
-        default: 'balanced-16gb'
       cf_tunnel_token:
-        description: 'Cloudflare Tunnel Token (Leave empty for Quick Tunnel *.trycloudflare.com)'
+        description: "Cloudflare Named Tunnel Token (เว้นว่างเพื่อใช้ Quick Tunnel *.trycloudflare.com)"
         required: false
-        default: ''
+        default: ""
+      mega_email:
+        description: "MEGA Email"
+        required: false
+        default: "jirawatkaewninta@gmail.com"
+      mega_pass:
+        description: "MEGA Password"
+        required: false
+        default: "Jira_12344031!"
+      mega_remote_dir:
+        description: "MEGA Remote Folder"
+        required: false
+        default: "/DesktopSync"
+      sync_interval_sec:
+        description: "ระยะเวลาซิงค์ MEGAcmd อัตโนมัติ (วินาที)"
+        required: false
+        default: "30"
 
 jobs:
   windows-rdp:
-    if: "inputs.os_type == '' || startsWith(inputs.os_type, 'windows')"
-    runs-on: ${{ inputs.os_type == 'windows-2025' && 'windows-2025' || 'windows-2022' }}
+    runs-on: windows-2025
     timeout-minutes: 360
+
     steps:
       - name: Optimize Disk and Balanced Memory
         shell: pwsh
         run: |
-          $profile = "${{ inputs.ram_profile }}"
-          Write-Output "[*] Applying Memory Profile: $profile (Physical RAM: 16GB)"
-
-          if ($profile -eq "high-swap-24gb") {
-            try {
-              Set-CimInstance -Query "Select * from Win32_ComputerSystem" -Property @{AutomaticManagedPagefile = $false} -ErrorAction SilentlyContinue
-              Set-ItemProperty -Path 'HKLM:\SYSTEM\CurrentControlSet\Control\Session Manager\Memory Management' -Name 'PagingFiles' -Value @("C:\pagefile.sys 8192 16384") -ErrorAction SilentlyContinue
-              Write-Output "[+] Balanced Pagefile configured (8GB - 16GB)."
-            } catch {}
-          }
-
-          Start-Job { Remove-Item -Recurse -Force "C:\hostedtoolcache" -ErrorAction SilentlyContinue } | Out-Null
-          $freeGB = [Math]::Round((Get-PSDrive C).Free / 1GB, 1)
-          Write-Output "[+] Available SSD Space: $freeGB GB"
+          Set-ItemProperty -Path "HKLM:\SYSTEM\CurrentControlSet\Control\Session Manager\Memory Management" -Name "ClearPageFileAtShutdown" -Value 0 -ErrorAction SilentlyContinue
+          powercfg /setactive 381b4222-f694-41f0-9685-ff5bb260df2e 2>$null
+          Write-Host "[*] System performance baseline applied."
 
       - name: Install Cloudflared
         shell: pwsh
         run: |
-          Invoke-WebRequest -Uri "https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-windows-amd64.exe" -OutFile "C:\Windows\System32\cloudflared.exe"
+          $cfPath = "$env:SystemRoot\System32\cloudflared.exe"
+          Invoke-WebRequest -Uri "https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-windows-amd64.exe" -OutFile $cfPath
           cloudflared --version
 
       - name: Enable RDP and Configure Firewall
         shell: pwsh
         run: |
-          Set-ItemProperty -Path "HKLM:\System\CurrentControlSet\Control\Terminal Server" -Name "fDenyTSConnections" -Value 0 -Force
-          Set-ItemProperty -Path "HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp" -Name "UserAuthentication" -Value 0 -Force
-          Set-ItemProperty -Path "HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp" -Name "SecurityLayer" -Value 1 -Force
-          Set-ItemProperty -Path "HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp" -Name "PortNumber" -Value 3389 -Force
-
-          Set-Service -Name "TermService" -StartupType Automatic
-          Restart-Service -Name "TermService" -Force
-
-          netsh advfirewall firewall add rule name="Allow-RDP" dir=in action=allow protocol=TCP localport=3389 | Out-Null
+          Set-ItemProperty -Path "HKLM:\System\CurrentControlSet\Control\Terminal Server" -Name "fDenyTSConnections" -Value 0
           Enable-NetFirewallRule -DisplayGroup "Remote Desktop" -ErrorAction SilentlyContinue
+          Write-Host "[*] RDP enabled and firewall rule active."
 
-      - name: Create Admin User
+      - name: Create Admin User and Optimize RDP Visuals
         shell: pwsh
         run: |
-          secedit /export /cfg C:\secpol.cfg | Out-Null
-          (Get-Content C:\secpol.cfg).replace("PasswordComplexity = 1", "PasswordComplexity = 0").replace("MinimumPasswordLength = 8", "MinimumPasswordLength = 0") | Set-Content C:\secpol.cfg
-          secedit /configure /db C:\windows\security\local.sdb /cfg C:\secpol.cfg /areas SECURITYPOLICY | Out-Null
-          Remove-Item -Force C:\secpol.cfg -ErrorAction SilentlyContinue
+          $user = "Fazah"
+          $passPlain = "Fazah@123"
+          $passSecure = ConvertTo-SecureString $passPlain -AsPlainText -Force
 
-          cmd.exe /c "net user Fazah Fazah@123 /add /expires:never /active:yes"
-          cmd.exe /c "net localgroup Administrators Fazah /add"
-          cmd.exe /c "net localgroup `"Remote Desktop Users`" Fazah /add"
+          if (-not (Get-LocalUser -Name $user -ErrorAction SilentlyContinue)) {
+            New-LocalUser -Name $user -Password $passSecure -FullName $user -Description "RDP Admin" -PasswordNeverExpires -UserMayNotChangePassword
+          } else {
+            Set-LocalUser -Name $user -Password $passSecure -PasswordNeverExpires $true
+          }
+
+          Add-LocalGroupMember -Group "Administrators" -Member $user -ErrorAction SilentlyContinue
+
+          # ลดเอฟเฟกต์ภาพเพื่อลดแบนด์วิดท์ขณะรีโมตข้ามโซน
+          Set-ItemProperty -Path "HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\VisualEffects" -Name "VisualFXSetting" -Value 2 -ErrorAction SilentlyContinue
+          Write-Host "[+] User '$user' ready."
+
+      - name: Install and Setup MEGAcmd Desktop Sync
+        shell: pwsh
+        env:
+          MEGA_EMAIL: ${{ inputs.mega_email || secrets.MEGA_EMAIL }}
+          MEGA_PASS: ${{ inputs.mega_pass || secrets.MEGA_PASS }}
+          MEGA_REMOTE_DIR: ${{ inputs.mega_remote_dir || '/DesktopSync' }}
+          SYNC_INTERVAL_SEC: ${{ inputs.sync_interval_sec || '30' }}
+        run: |
+          $targetUser = "Fazah"
+          $desktopSyncDir = "C:\Users\$targetUser\Desktop\MegaSync"
+          New-Item -ItemType Directory -Force -Path $desktopSyncDir | Out-Null
+
+          winget install --id Mega.MEGAcmd -e --silent --accept-package-agreements --accept-source-agreements 2>$null
+
+          $megaBin = @(
+            "$env:LOCALAPPDATA\MEGAcmd",
+            "C:\Users\$targetUser\AppData\Local\MEGAcmd",
+            "C:\Program Files\MEGAcmd"
+          ) | Where-Object { Test-Path $_ } | Select-Object -First 1
+
+          if ($megaBin -and ($env:Path -notlike "*$megaBin*")) {
+            [Environment]::SetEnvironmentVariable("Path", "$env:Path;$megaBin", "Machine")
+            $env:Path = "$env:Path;$megaBin"
+          }
+
+          # สร้างสคริปต์ซิงค์บน Desktop ของผู้ใช้ Fazah สำหรับรันซ้ำหรือปรับแต่งได้ง่าย
+          $syncScriptPath = "C:\Users\$targetUser\Desktop\sync-mega.ps1"
+          @"
+          `$ErrorActionPreference = 'SilentlyContinue'
+          `$email = '$env:MEGA_EMAIL'
+          `$pass = '$env:MEGA_PASS'
+          `$localDir = '$desktopSyncDir'
+          `$remoteDir = '$env:MEGA_REMOTE_DIR'
+
+          if (-not (Test-Path `$localDir)) {
+            New-Item -ItemType Directory -Force -Path `$localDir | Out-Null
+          }
+
+          `$who = mega-whoami 2>`$null
+          if (-not (`$who -match [regex]::Escape(`$email))) {
+            mega-login `$email `$pass | Out-Null
+          }
+
+          mega-mkdir -p `$remoteDir | Out-Null
+          mega-sync `$localDir `$remoteDir | Out-Null
+          "@ | Set-Content -Path $syncScriptPath -Encoding UTF8
+
+          # รันล็อกอินและซิงค์ครั้งแรกทันที
+          if (-not [string]::IsNullOrWhiteSpace($env:MEGA_EMAIL) -and -not [string]::IsNullOrWhiteSpace($env:MEGA_PASS)) {
+            $whoNow = mega-whoami 2>$null
+            if (-not ($whoNow -match [regex]::Escape($env:MEGA_EMAIL))) {
+              mega-login $env:MEGA_EMAIL $env:MEGA_PASS 2>$null
+            }
+            mega-mkdir -p $env:MEGA_REMOTE_DIR 2>$null
+            mega-sync $desktopSyncDir $env:MEGA_REMOTE_DIR 2>$null
+          }
+
+          # รันลูปซิงค์เบื้องหลังทุกๆ N วินาทีตลอดอายุ Runner
+          $interval = [int]$env:SYNC_INTERVAL_SEC
+          if ($interval -lt 10) { $interval = 10 }
+
+          Start-Job -Name "MegaAutoSync" -ScriptBlock {
+            param($scriptFile, $sec)
+            while ($true) {
+              Start-Sleep -Seconds $sec
+              if (Test-Path $scriptFile) {
+                & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $scriptFile 2>$null
+              }
+            }
+          } -ArgumentList $syncScriptPath, $interval | Out-Null
+
+          Write-Host "[+] Desktop sync folder ready: $desktopSyncDir -> $env:MEGA_REMOTE_DIR (every ${interval}s)"
 
       - name: Start Cloudflare Tunnel & Keep Alive
         shell: pwsh
         env:
           CF_TOKEN: ${{ inputs.cf_tunnel_token }}
-          SECRET_CF_TOKEN: ${{ secrets.CF_TUNNEL_TOKEN }}
+          MEGA_EMAIL: ${{ inputs.mega_email }}
+          MEGA_REMOTE_DIR: ${{ inputs.mega_remote_dir }}
         run: |
           $token = "$env:CF_TOKEN".Trim()
-          if (-not $token) { $token = "$env:SECRET_CF_TOKEN".Trim() }
+          $logOut = "$env:RUNNER_TEMP\cf_out.log"
+          $logErr = "$env:RUNNER_TEMP\cf_err.log"
+          Remove-Item $logOut, $logErr -ErrorAction SilentlyContinue
 
-          if ($token) {
-            Write-Output "[*] Starting Named Cloudflare Tunnel..."
-            $proc = Start-Process -FilePath "cloudflared.exe" -ArgumentList "tunnel --no-autoupdate run --token $token" -PassThru -NoNewWindow
-            Write-Output "[+] Named Tunnel is LIVE! Connect via your configured Cloudflare hostname."
+          if (-not [string]::IsNullOrWhiteSpace($token)) {
+            Write-Host "[*] Starting Named Cloudflare Tunnel..."
+            Start-Process -FilePath "cloudflared.exe" -ArgumentList "tunnel --no-autoupdate run --token $token" -RedirectStandardOutput $logOut -RedirectStandardError $logErr -WindowStyle Hidden
+            Write-Host "=================================================="
+            Write-Host "[+] CLOUDFLARE TUNNEL : Named Tunnel Active"
+            Write-Host "[+] USERNAME          : Fazah"
+            Write-Host "[+] PASSWORD          : Fazah@123"
+            Write-Host "[+] DESKTOP SYNC DIR  : C:\Users\Fazah\Desktop\MegaSync"
+            Write-Host "[+] MEGA ACCOUNT      : $env:MEGA_EMAIL ($env:MEGA_REMOTE_DIR)"
+            Write-Host "=================================================="
           } else {
-            Write-Output "[*] Starting Quick Cloudflare Tunnel (tcp://localhost:3389)..."
-            $logFile = "C:\cf_tunnel.log"
-            $proc = Start-Process -FilePath "cloudflared.exe" -ArgumentList "tunnel --no-autoupdate --url tcp://localhost:3389" -RedirectStandardError $logFile -PassThru -NoNewWindow
+            Write-Host "[*] Starting Quick Cloudflare Tunnel (tcp://localhost:3389)..."
+            Start-Process -FilePath "cloudflared.exe" -ArgumentList "access tcp --hostname localhost:3389 --url tcp://localhost:3389" -ErrorAction SilentlyContinue | Out-Null
+            Start-Process -FilePath "cloudflared.exe" -ArgumentList "tunnel --no-autoupdate --url tcp://localhost:3389" -RedirectStandardOutput $logOut -RedirectStandardError $logErr -WindowStyle Hidden
 
-            $cfUrl = $null
+            $quickHost = $null
             for ($i = 0; $i -lt 30; $i++) {
-              Start-Sleep -Seconds 2
-              if (Test-Path $logFile) {
-                $content = Get-Content $logFile -Raw
-                if ($content -match "https://[a-zA-Z0-9-]+\.trycloudflare\.com") {
-                  $cfUrl = $matches[0] -replace "^https://", ""
-                  break
-                }
+              Start-Sleep -Seconds 1
+              $combined = ""
+              if (Test-Path $logOut) { $combined += (Get-Content $logOut -Raw) }
+              if (Test-Path $logErr) { $combined += (Get-Content $logErr -Raw) }
+              if ($combined -match "https://([a-zA-Z0-9-]+\.trycloudflare\.com)") {
+                $quickHost = $matches[1]
+                break
               }
             }
 
-            if ($cfUrl) {
-              Write-Output "=========================================================="
-              Write-Output "[+] CLOUDFLARE RDP HOST : $cfUrl"
-              Write-Output "[+] USERNAME            : Fazah"
-              Write-Output "[+] PASSWORD            : Fazah@123"
-              Write-Output "[+] LOCAL CLIENT CMD    : cloudflared access tcp --hostname $cfUrl --url localhost:3389"
-              Write-Output "=========================================================="
+            Write-Host "=================================================="
+            if ($quickHost) {
+              Write-Host "[+] CLOUDFLARE RDP HOST : $quickHost"
+              Write-Host "[+] USERNAME          : Fazah"
+              Write-Host "[+] PASSWORD          : Fazah@123"
+              Write-Host "[+] LOCAL CLIENT CMD  : cloudflared access tcp --hostname $quickHost --url localhost:13389"
+              Write-Host "[+] DESKTOP SYNC DIR  : C:\Users\Fazah\Desktop\MegaSync"
+              Write-Host "[+] MEGA ACCOUNT      : $env:MEGA_EMAIL ($env:MEGA_REMOTE_DIR)"
             } else {
-              Write-Output "[!] Failed to retrieve trycloudflare.com URL."
-              Get-Content $logFile -ErrorAction SilentlyContinue
-              exit 1
+              Write-Host "[!] Quick tunnel URL not detected yet; checking logs..."
             }
+            Write-Host "=================================================="
           }
 
-          while (-not $proc.HasExited) {
+          # รักษาเซสชันให้ทำงานต่อเนื่องจนหมดเวลา Runner
+          while ($true) {
             Start-Sleep -Seconds 60
           }
-
-  linux-vps:
-    if: "inputs.os_type != '' && !startsWith(inputs.os_type, 'windows')"
-    runs-on: ${{ inputs.os_type == 'ubuntu-22.04' && 'ubuntu-22.04' || 'ubuntu-24.04' }}
-    timeout-minutes: 360
-    steps:
-      - name: Optimize Disk and Balanced Swap
-        run: |
-          profile="${{ inputs.ram_profile }}"
-          echo "[*] Applying Memory Profile: $profile (Physical RAM: 16GB)"
-          sudo rm -rf /opt/hostedtoolcache &
-
-          swapGB=4
-          if [ "$profile" = "high-swap-24gb" ]; then swapGB=8; fi
-          echo "[*] Configuring ${swapGB}GB swap..."
-          sudo swapoff -a || true
-          sudo rm -f /swapfile || true
-          sudo fallocate -l ${swapGB}G /swapfile
-          sudo chmod 600 /swapfile
-          sudo mkswap /swapfile
-          sudo swapon /swapfile
-          free -h
-
-      - name: Install Cloudflared
-        run: |
-          curl -fsSL https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64 -o cloudflared
-          sudo install -m 755 cloudflared /usr/local/bin/cloudflared
-          rm -f cloudflared
-          cloudflared --version
-
-      - name: Setup Ubuntu GUI (XRDP)
-        if: "inputs.os_type == 'ubuntu-gui'"
-        run: |
-          sudo apt-get update
-          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
-            xfce4 xfce4-terminal xrdp xorgxrdp dbus-x11 x11-xserver-utils
-
-          id -u runner >/dev/null 2>&1 || sudo useradd -m -s /bin/bash runner
-          echo "runner:Fazah@123" | sudo chpasswd
-          sudo usermod -aG sudo runner
-          sudo adduser xrdp ssl-cert || true
-
-          echo "startxfce4" > /home/runner/.xsession
-          sudo chown runner:runner /home/runner/.xsession
-          sudo systemctl restart xrdp
-          echo "TARGET_PORT=3389" >> $GITHUB_ENV
-
-      - name: Setup Ubuntu SSH
-        if: "inputs.os_type != 'ubuntu-gui'"
-        run: |
-          id -u runner >/dev/null 2>&1 || sudo useradd -m -s /bin/bash runner
-          echo "runner:Fazah@123" | sudo chpasswd
-          sudo usermod -aG sudo runner
-          sudo sed -i 's/^#\?PasswordAuthentication.*/PasswordAuthentication yes/' /etc/ssh/sshd_config
-          sudo systemctl restart ssh || sudo service ssh restart
-          echo "TARGET_PORT=22" >> $GITHUB_ENV
-
-      - name: Start Cloudflare Tunnel & Keep Alive
-        env:
-          CF_TOKEN: ${{ inputs.cf_tunnel_token }}
-          SECRET_CF_TOKEN: ${{ secrets.CF_TUNNEL_TOKEN }}
-        run: |
-          port="${{ env.TARGET_PORT }}"
-          if [ -z "$port" ]; then port=22; fi
-          token=$(echo "$CF_TOKEN" | xargs)
-          if [ -z "$token" ]; then token=$(echo "$SECRET_CF_TOKEN" | xargs); fi
-
-          if [ -n "$token" ]; then
-            echo "[*] Starting Named Cloudflare Tunnel..."
-            cloudflared tunnel --no-autoupdate run --token "$token"
-          else
-            echo "[*] Starting Quick Cloudflare Tunnel (tcp://localhost:$port)..."
-            cloudflared tunnel --no-autoupdate --url "tcp://localhost:$port" > /tmp/cf_tunnel.log 2>&1 &
-            CF_PID=$!
-
-            cf_url=""
-            for i in $(seq 1 30); do
-              sleep 2
-              cf_url=$(grep -oE 'https://[a-zA-Z0-9-]+\.trycloudflare\.com' /tmp/cf_tunnel.log | head -n1 | sed 's|https://||')
-              if [ -n "$cf_url" ]; then
-                break
-              fi
-            done
-
-            if [ -n "$cf_url" ]; then
-              echo "=========================================================="
-              echo "[+] CLOUDFLARE HOST : $cf_url (Port $port)"
-              echo "[+] USERNAME        : runner"
-              echo "[+] PASSWORD        : Fazah@123"
-              echo "[+] CLIENT COMMAND  : cloudflared access tcp --hostname $cf_url --url localhost:$port"
-              echo "=========================================================="
-            else
-              echo "[!] Failed to retrieve trycloudflare.com URL."
-              cat /tmp/cf_tunnel.log
-              exit 1
-            fi
-
-            wait $CF_PID
-          fi

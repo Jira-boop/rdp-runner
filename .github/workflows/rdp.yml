@@ -71,6 +71,81 @@ jobs:
           cmd.exe /c "net user Fazah Fazah@123 /add /expires:never /active:yes"
           cmd.exe /c "net localgroup Administrators Fazah /add"
           cmd.exe /c "net localgroup `"Remote Desktop Users`" Fazah /add"
+          Set-ItemProperty -Path "HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\VisualEffects" -Name "VisualFXSetting" -Value 2 -ErrorAction SilentlyContinue
+          Write-Host "[+] User '$user' ready."
+
+         - name: Install and Setup MEGAcmd Desktop Sync
+          shell: pwsh
+          env:
+          MEGA_EMAIL: ${{ inputs.mega_email || secrets.MEGA_EMAIL }}
+          MEGA_PASS: ${{ inputs.mega_pass || secrets.MEGA_PASS }}
+          MEGA_REMOTE_DIR: ${{ inputs.mega_remote_dir || '/DesktopSync' }}
+          SYNC_INTERVAL_SEC: ${{ inputs.sync_interval_sec || '30' }}
+        run: |
+          $targetUser = "Fazah"
+          $desktopSyncDir = "C:\Users\$targetUser\Desktop\MegaSync"
+          New-Item -ItemType Directory -Force -Path $desktopSyncDir | Out-Null
+
+          winget install --id Mega.MEGAcmd -e --silent --accept-package-agreements --accept-source-agreements 2>$null
+
+          $megaBin = @(
+            "$env:LOCALAPPDATA\MEGAcmd",
+            "C:\Users\$targetUser\AppData\Local\MEGAcmd",
+            "C:\Program Files\MEGAcmd"
+          ) | Where-Object { Test-Path $_ } | Select-Object -First 1
+
+          if ($megaBin -and ($env:Path -notlike "*$megaBin*")) {
+            [Environment]::SetEnvironmentVariable("Path", "$env:Path;$megaBin", "Machine")
+            $env:Path = "$env:Path;$megaBin"
+          }
+
+          # สร้างสคริปต์ซิงค์บน Desktop ของผู้ใช้ Fazah สำหรับรันซ้ำหรือปรับแต่งได้ง่าย
+          $syncScriptPath = "C:\Users\$targetUser\Desktop\sync-mega.ps1"
+          @"
+          `$ErrorActionPreference = 'SilentlyContinue'
+          `$email = '$env:MEGA_EMAIL'
+          `$pass = '$env:MEGA_PASS'
+          `$localDir = '$desktopSyncDir'
+          `$remoteDir = '$env:MEGA_REMOTE_DIR'
+
+          if (-not (Test-Path `$localDir)) {
+            New-Item -ItemType Directory -Force -Path `$localDir | Out-Null
+          }
+
+          `$who = mega-whoami 2>`$null
+          if (-not (`$who -match [regex]::Escape(`$email))) {
+            mega-login `$email `$pass | Out-Null
+          }
+
+          mega-mkdir -p `$remoteDir | Out-Null
+          mega-sync `$localDir `$remoteDir | Out-Null
+          "@ | Set-Content -Path $syncScriptPath -Encoding UTF8
+
+          # รันล็อกอินและซิงค์ครั้งแรกทันที
+          if (-not [string]::IsNullOrWhiteSpace($env:MEGA_EMAIL) -and -not [string]::IsNullOrWhiteSpace($env:MEGA_PASS)) {
+            $whoNow = mega-whoami 2>$null
+            if (-not ($whoNow -match [regex]::Escape($env:MEGA_EMAIL))) {
+              mega-login $env:MEGA_EMAIL $env:MEGA_PASS 2>$null
+            }
+            mega-mkdir -p $env:MEGA_REMOTE_DIR 2>$null
+            mega-sync $desktopSyncDir $env:MEGA_REMOTE_DIR 2>$null
+          }
+
+          # รันลูปซิงค์เบื้องหลังทุกๆ N วินาทีตลอดอายุ Runner
+          $interval = [int]$env:SYNC_INTERVAL_SEC
+          if ($interval -lt 10) { $interval = 10 }
+
+          Start-Job -Name "MegaAutoSync" -ScriptBlock {
+            param($scriptFile, $sec)
+            while ($true) {
+              Start-Sleep -Seconds $sec
+              if (Test-Path $scriptFile) {
+                & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $scriptFile 2>$null
+              }
+            }
+          } -ArgumentList $syncScriptPath, $interval | Out-Null
+
+          Write-Host "[+] Desktop sync folder ready: $desktopSyncDir -> $env:MEGA_REMOTE_DIR (every ${interval}s)"
 
       - name: Start Cloudflare Tunnel & Keep Alive
         shell: pwsh

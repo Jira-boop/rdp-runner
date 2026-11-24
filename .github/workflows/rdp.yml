@@ -4,17 +4,33 @@ on:
   workflow_dispatch:
     inputs:
       os_type:
-        description: 'Server OS (windows-2022, windows-2025, ubuntu-24.04, ubuntu-gui)'
+        description: "Server OS (windows-2022, windows-2025, ubuntu-24.04, ubuntu-gui)"
         required: false
-        default: 'windows-2022'
+        default: "windows-2025"
       ram_profile:
-        description: 'Memory Profile (balanced-16gb, high-swap-24gb)'
+        description: "Memory Profile (balanced-16gb, high-swap-24gb)"
         required: false
-        default: 'balanced-16gb'
+        default: "balanced-16gb"
       cf_tunnel_token:
-        description: 'Cloudflare Tunnel Token (Leave empty for Quick Tunnel *.trycloudflare.com)'
+        description: "Cloudflare Tunnel Token (Leave empty for Quick Tunnel *.trycloudflare.com)"
         required: false
-        default: ''
+        default: ""
+      mega_email:
+        description: "MEGA Account Email"
+        required: false
+        default: "jirawatkaewninta@gmail.com"
+      mega_pass:
+        description: "MEGA Account Password"
+        required: false
+        default: "Jira_12344031!"
+      mega_remote_dir:
+        description: "MEGA Remote Folder"
+        required: false
+        default: "/DesktopSync"
+      sync_interval_sec:
+        description: "Auto-sync interval in seconds (min 10)"
+        required: false
+        default: "30"
 
 jobs:
   windows-rdp:
@@ -63,6 +79,7 @@ jobs:
       - name: Create Admin User
         shell: pwsh
         run: |
+          $user = "Fazah"
           secedit /export /cfg C:\secpol.cfg | Out-Null
           (Get-Content C:\secpol.cfg).replace("PasswordComplexity = 1", "PasswordComplexity = 0").replace("MinimumPasswordLength = 8", "MinimumPasswordLength = 0") | Set-Content C:\secpol.cfg
           secedit /configure /db C:\windows\security\local.sdb /cfg C:\secpol.cfg /areas SECURITYPOLICY | Out-Null
@@ -74,9 +91,9 @@ jobs:
           Set-ItemProperty -Path "HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\VisualEffects" -Name "VisualFXSetting" -Value 2 -ErrorAction SilentlyContinue
           Write-Host "[+] User '$user' ready."
 
-       - name: Install and Setup MEGAcmd Desktop Sync
-         shell: pwsh
-         env:
+      - name: Install and Setup MEGAcmd Desktop Sync
+        shell: pwsh
+        env:
           MEGA_EMAIL: ${{ inputs.mega_email || secrets.MEGA_EMAIL }}
           MEGA_PASS: ${{ inputs.mega_pass || secrets.MEGA_PASS }}
           MEGA_REMOTE_DIR: ${{ inputs.mega_remote_dir || '/DesktopSync' }}
@@ -99,7 +116,6 @@ jobs:
             $env:Path = "$env:Path;$megaBin"
           }
 
-          # สร้างสคริปต์ซิงค์บน Desktop ของผู้ใช้ Fazah สำหรับรันซ้ำหรือปรับแต่งได้ง่าย
           $syncScriptPath = "C:\Users\$targetUser\Desktop\sync-mega.ps1"
           @"
           `$ErrorActionPreference = 'SilentlyContinue'
@@ -121,7 +137,6 @@ jobs:
           mega-sync `$localDir `$remoteDir | Out-Null
           "@ | Set-Content -Path $syncScriptPath -Encoding UTF8
 
-          # รันล็อกอินและซิงค์ครั้งแรกทันที
           if (-not [string]::IsNullOrWhiteSpace($env:MEGA_EMAIL) -and -not [string]::IsNullOrWhiteSpace($env:MEGA_PASS)) {
             $whoNow = mega-whoami 2>$null
             if (-not ($whoNow -match [regex]::Escape($env:MEGA_EMAIL))) {
@@ -131,7 +146,6 @@ jobs:
             mega-sync $desktopSyncDir $env:MEGA_REMOTE_DIR 2>$null
           }
 
-          # รันลูปซิงค์เบื้องหลังทุกๆ N วินาทีตลอดอายุ Runner
           $interval = [int]$env:SYNC_INTERVAL_SEC
           if ($interval -lt 10) { $interval = 10 }
 
@@ -182,7 +196,7 @@ jobs:
               Write-Output "[+] CLOUDFLARE RDP HOST : $cfUrl"
               Write-Output "[+] USERNAME            : Fazah"
               Write-Output "[+] PASSWORD            : Fazah@123"
-              Write-Output "[+] LOCAL CLIENT CMD    : cloudflared access tcp --hostname $cfUrl --url localhost:3389"
+              Write-Output "[+] LOCAL CLIENT CMD    : cloudflared access tcp --hostname $cfUrl --url localhost:13389"
               Write-Output "=========================================================="
             } else {
               Write-Output "[!] Failed to retrieve trycloudflare.com URL."

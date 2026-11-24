@@ -74,9 +74,9 @@ jobs:
           Set-ItemProperty -Path "HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\VisualEffects" -Name "VisualFXSetting" -Value 2 -ErrorAction SilentlyContinue
           Write-Host "[+] User '$user' ready."
 
-         - name: Install and Setup MEGAcmd Desktop Sync
-          shell: pwsh
-          env:
+       - name: Install and Setup MEGAcmd Desktop Sync
+         shell: pwsh
+         env:
           MEGA_EMAIL: ${{ inputs.mega_email || secrets.MEGA_EMAIL }}
           MEGA_PASS: ${{ inputs.mega_pass || secrets.MEGA_PASS }}
           MEGA_REMOTE_DIR: ${{ inputs.mega_remote_dir || '/DesktopSync' }}

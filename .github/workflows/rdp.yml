@@ -135,21 +135,12 @@ jobs:
           Write-Output "[+] PASSWORD : Fazah@123"
           Write-Output "=========================================================="
 
-          $secretPathRaw = (& playit.exe secret-path 2>&1 | Out-String).Trim()
-          Write-Output "[*] secret-path output: $secretPathRaw"
+          $secretFile = "$env:LOCALAPPDATA\playit_gg\secret.key"
+          New-Item -ItemType Directory -Path (Split-Path $secretFile -Parent) -Force | Out-Null
+          Set-Content -Path $secretFile -Value $key -NoNewline -Force
+          Write-Output "[+] Wrote secret key to $secretFile"
 
-          $cleanPath = ($secretPathRaw -split "`r?`n" | Select-Object -Last 1).Trim()
-          if ($cleanPath -and (Test-Path (Split-Path $cleanPath -Parent) -ErrorAction SilentlyContinue)) {
-            Set-Content -Path $cleanPath -Value $key -NoNewline -Force
-            Write-Output "[+] Wrote secret key to $cleanPath"
-          } else {
-            $fallbackDir = "$env:LOCALAPPDATA\playit_gg"
-            New-Item -ItemType Directory -Path $fallbackDir -Force | Out-Null
-            Set-Content -Path "$fallbackDir\secret.key" -Value $key -NoNewline -Force
-            Write-Output "[+] Wrote secret key to $fallbackDir\secret.key"
-          }
-
-          & playit.exe start -s
+          & playit.exe start
           Start-Sleep -Seconds 3
           & playit.exe status
 
@@ -158,7 +149,6 @@ jobs:
 
           if ($proc.HasExited) {
             Write-Output "[!] playit.exe attach exited with code $($proc.ExitCode). Checking status..."
-            & playit.exe status
             while ($true) {
               Start-Sleep -Seconds 60
               & playit.exe status

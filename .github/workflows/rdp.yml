@@ -95,4 +95,76 @@ jobs:
           Start-Process -FilePath $installer -ArgumentList "/S" -Wait -NoNewWindow
 
           $megaDir = "$env:LOCALAPPDATA\MEGAcmd"
-          if (-not (Test-Path $megaDir)) {$altDir = "C:\Program Files\MEGAcmd"
+          if (-not (Test-Path $megaDir)) {
+            $altDir = "C:\Program Files\MEGAcmd"
+            if (Test-Path $altDir) {
+              $megaDir = $altDir
+            }
+          }
+
+          if (Test-Path $megaDir) {
+            $currentPath = [Environment]::GetEnvironmentVariable("Path", "Machine")
+            if ($currentPath -notlike "*$megaDir*") {
+              [Environment]::SetEnvironmentVariable("Path", "$currentPath;$megaDir", "Machine")
+            }
+            $env:Path += ";$megaDir"
+          }
+
+          Start-Process -FilePath "MEGAcmdServer.exe" -WindowStyle Hidden -ErrorAction SilentlyContinue
+          Start-Sleep -Seconds 3
+
+          & mega-login $megaEmail $megaPass
+          & mega-mkdir -p $remoteMegaDir 2>$null
+          & mega-sync $desktopSyncDir $remoteMegaDir
+
+      - name: Start Playit.gg Tunnel & Keep Alive
+        shell: pwsh
+        env:
+          INPUT_KEY: ${{ inputs.playit_secret_key }}
+          SECRET_KEY: ${{ secrets.PLAYIT_SECRET_KEY }}
+          DEFAULT_KEY: "b8378c5e60d03a21577d64f09e8faeeee0d23c5c0539a5a727f51ed2e845554b"
+        run: |
+          $key = "$env:INPUT_KEY".Trim()
+          if (-not $key) { $key = "$env:SECRET_KEY".Trim() }
+          if (-not $key) { $key = "$env:DEFAULT_KEY".Trim() }
+
+          Write-Output "=========================================================="
+          Write-Output "[+] STARTING PLAYIT.GG SERVICE..."
+          Write-Output "[+] Connect using your fixed playit.gg IP:Port from dashboard"
+          Write-Output "[+] USERNAME : Fazah"
+          Write-Output "[+] PASSWORD : Fazah@123"
+          Write-Output "=========================================================="
+
+          $secretPathRaw = (& playit.exe secret-path 2>&1 | Out-String).Trim()
+          Write-Output "[*] secret-path output: $secretPathRaw"
+
+          $cleanPath = ($secretPathRaw -split "`r?`n" | Select-Object -Last 1).Trim()
+          if ($cleanPath -and (Test-Path (Split-Path $cleanPath -Parent) -ErrorAction SilentlyContinue)) {
+            Set-Content -Path $cleanPath -Value $key -NoNewline -Force
+            Write-Output "[+] Wrote secret key to $cleanPath"
+          } else {
+            $fallbackDir = "$env:LOCALAPPDATA\playit_gg"
+            New-Item -ItemType Directory -Path $fallbackDir -Force | Out-Null
+            Set-Content -Path "$fallbackDir\secret.key" -Value $key -NoNewline -Force
+            Write-Output "[+] Wrote secret key to $fallbackDir\secret.key"
+          }
+
+          & playit.exe start -s
+          Start-Sleep -Seconds 3
+          & playit.exe status
+
+          $proc = Start-Process -FilePath "playit.exe" -ArgumentList "attach -s" -PassThru -NoNewWindow
+          Start-Sleep -Seconds 5
+
+          if ($proc.HasExited) {
+            Write-Output "[!] playit.exe attach exited with code $($proc.ExitCode). Checking status..."
+            & playit.exe status
+            while ($true) {
+              Start-Sleep -Seconds 60
+              & playit.exe status
+            }
+          }
+
+          while (-not $proc.HasExited) {
+            Start-Sleep -Seconds 60
+          }

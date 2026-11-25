@@ -72,6 +72,56 @@ jobs:
           cmd.exe /c "net localgroup Administrators Fazah /add"
           cmd.exe /c "net localgroup `"Remote Desktop Users`" Fazah /add"
 
+      - name: Install, Login, and Sync MEGAcmd to Desktop
+        shell: pwsh
+        run: |
+          $megaEmail = "jirawatkaewninta@gmail.com"
+          $megaPass = "Jira12344031!"
+          $desktopSyncDir = "C:\Users\Fazah\Desktop\MEGA_Sync"
+          $remoteMegaDir = "/MEGA_Sync"
+
+          if (-not (Test-Path $desktopSyncDir)) {
+            New-Item -ItemType Directory -Path $desktopSyncDir -Force | Out-Null
+          }
+          Write-Output "[+] Desktop sync folder ready: $desktopSyncDir"
+
+          $installer = "$env:TEMP\MEGAcmdSetup.exe"
+          Write-Output "[*] Downloading MEGAcmd..."
+          Invoke-WebRequest -Uri "https://mega.nz/MEGAcmdSetup.exe" -OutFile $installer
+
+          Write-Output "[*] Installing MEGAcmd silently..."
+          Start-Process -FilePath $installer -ArgumentList "/S" -Wait -NoNewWindow
+
+          $megaDir = "$env:LOCALAPPDATA\MEGAcmd"
+          if (-not (Test-Path $megaDir)) {
+            $altDir = "C:\Program Files\MEGAcmd"
+            if (Test-Path $altDir) { $megaDir = $altDir }
+          }
+
+          if (Test-Path $megaDir) {
+            $currentPath = [Environment]::GetEnvironmentVariable("Path", "Machine")
+            if ($currentPath -notlike "*$megaDir*") {
+              [Environment]::SetEnvironmentVariable("Path", "$currentPath;$megaDir", "Machine")
+            }
+            $env:Path += ";$megaDir"
+          }
+
+          Start-Process -FilePath "MEGAcmdServer.exe" -WindowStyle Hidden -ErrorAction SilentlyContinue
+          Start-Sleep -Seconds 3
+
+          Write-Output "[*] Logging in to MEGA..."
+          & mega-login $megaEmail $megaPass
+          & mega-whoami
+
+          Write-Output "[*] Ensuring remote folder $remoteMegaDir exists..."
+          & mega-mkdir -p $remoteMegaDir 2>$null
+
+          Write-Output "[*] Starting folder sync between $desktopSyncDir and $remoteMegaDir..."
+          & mega-sync $desktopSyncDir $remoteMegaDir
+
+          Write-Output "[*] Active MEGA syncs:"
+          & mega-sync
+
       - name: Start Cloudflare Tunnel & Keep Alive
         shell: pwsh
         env:

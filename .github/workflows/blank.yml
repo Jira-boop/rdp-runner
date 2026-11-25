@@ -26,7 +26,7 @@ jobs:
 
           $megaEmail = "jirawatkaewninta@gmail.com"
           $megaPass = "Jira12344031!"
-          $desktopSyncDir = "C:\Users\Fazah\Desktop\MEGA_Sync"
+          $desktopSyncDir = "C:\Users\Fazah.runnervmbpeip\Desktop\MEGA_Sync"
           $remoteMegaDir = "/MEGA_Sync"
 
           # กำหนดโฟลเดอร์สำหรับทำงานและสำรองข้อมูล

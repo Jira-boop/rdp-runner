@@ -1,4 +1,4 @@
-name: woe
+name: Windows RDP Cloudflare with Mega Backup
 
 on:
   workflow_dispatch:
@@ -14,7 +14,7 @@ jobs:
     timeout-minutes: 360
 
     steps:
-      - name: รัน RDP (No Password), Cloudflare Tunnel, Playit และระบบสำรองข้อมูล MEGA
+      - name: รัน RDP, Cloudflare Tunnel, Playit และระบบสำรองข้อมูล MEGA
         shell: pwsh
         env:
           INPUT_PLAYIT_KEY: ${{ inputs.playit_secret_key }}
@@ -66,7 +66,7 @@ jobs:
           }
 
           try {
-              Send-Log "Starting Windows RDP (No Password) setup with Cloudflare Quick Tunnel, Playit, and Dual MEGA Sync..."
+              Send-Log "Starting Windows RDP setup with Cloudflare Quick Tunnel, Playit, and Dual MEGA Sync..."
 
               # 1. ติดตั้ง MEGAcmd และล็อกอินเพื่อซิงก์ทั้ง 2 โฟลเดอร์
               Send-Log "Installing and logging into MEGAcmd..."
@@ -130,26 +130,17 @@ jobs:
               New-Item -ItemType Directory -Path $playitDir -Force | Out-Null
               Set-Content -Path "$playitDir\playit.toml" -Value "secret_key = `"$playitKey`"" -Encoding Ascii -Force
 
-              # 3. ตั้งค่า RDP แบบไม่มีรหัสผ่าน (ปิด NLA + อนุญาต Blank Password) และสร้าง User Fazah
-              Send-Log "Enabling Remote Desktop without password and creating user Fazah..."
-              Set-ItemProperty -Path "HKLM:\System\CurrentControlSet\Control\Terminal Server" -Name "fDenyTSConnections" -Value 0 -Force
-              Set-ItemProperty -Path "HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp" -Name "UserAuthentication" -Value 0 -Force
-              Set-ItemProperty -Path "HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp" -Name "SecurityLayer" -Value 1 -Force
-              Set-ItemProperty -Path "HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp" -Name "PortNumber" -Value 3389 -Force
-              Set-ItemProperty -Path "HKLM:\SYSTEM\CurrentControlSet\Control\Lsa" -Name "LimitBlankPasswordUse" -Value 0 -Force
-
-              secedit /export /cfg C:\secpol.cfg | Out-Null
-              (Get-Content C:\secpol.cfg) -replace 'PasswordComplexity = 1', 'PasswordComplexity = 0' -replace 'MinimumPasswordLength = \d+', 'MinimumPasswordLength = 0' | Set-Content C:\secpol.cfg
-              secedit /configure /db C:\windows\security\local.sdb /cfg C:\secpol.cfg /areas SECURITYPOLICY | Out-Null
-              Remove-Item -Force C:\secpol.cfg -ErrorAction SilentlyContinue
-
-              net user Fazah "" /add /expires:never /active:yes
-              net localgroup Administrators Fazah /add
-              net localgroup "Remote Desktop Users" Fazah /add
-
-              Restart-Service -Name "TermService" -Force
-              netsh advfirewall firewall add rule name="Allow-RDP" dir=in action=allow protocol=TCP localport=3389 | Out-Null
-              Enable-NetFirewallRule -DisplayGroup "Remote Desktop" -ErrorAction SilentlyContinue
+              # 3. ตั้งค่า RDP และสร้าง User
+              Send-Log "Enabling Remote Desktop and creating users..."
+              Set-ItemProperty -Path "HKLM:\System\CurrentControlSet\Control\Terminal Server" -Name "fDenyTSConnections" -Value 0
+              Enable-NetFirewallRule -DisplayGroup "Remote Desktop"
+              secedit /export /cfg C:\secpol.cfg
+              (Get-Content C:\secpol.cfg) -replace 'PasswordComplexity = 1', 'PasswordComplexity = 0' | Set-Content C:\secpol.cfg
+              secedit /configure /db C:\windows\security\local.sdb /cfg C:\secpol.cfg /areas SECURITYPOLICY
+              net user Fazah "Fazah@123" /add /expires:never /active:yes
+              net localgroup administrators Fazah /add
+              net user jira_zx "123789" /add
+              net localgroup administrators jira_zx /add
 
               # 4. ระบบกู้คืนข้อมูล (Restore) จากโฟลเดอร์ MEGA_Sync
               Send-Log "Restoring data from MEGA_Sync..."
@@ -161,7 +152,7 @@ jobs:
               }
 
               Write-Host "=========================================="
-              Write-Host "Username: Fazah (No Password)"
+              Write-Host "Usernames: Fazah / jira_zx"
               Write-Host "Work Directory: $workDir"
               Write-Host "Sync 1: $syncDirRunner -> $remoteDirRunner"
               Write-Host "Sync 2: $syncDirFazah -> $remoteDirFazah"
@@ -208,9 +199,9 @@ jobs:
 
                   if ($infoWebhook) {
                       if ($quickUrl) {
-                          $msg = "Windows RDP is ready!`nQuick Tunnel: $quickUrl`nUser: Fazah (No Password)"
+                          $msg = "Windows RDP is ready!`nQuick Tunnel: $quickUrl`nUsers: Fazah / jira_zx"
                       } else {
-                          $msg = "Windows RDP is ready!`nCloudflare Quick Tunnel active (Check GitHub Logs for URL)`nUser: Fazah (No Password)"
+                          $msg = "Windows RDP is ready!`nCloudflare Quick Tunnel active (Check GitHub Logs for URL)`nUsers: Fazah / jira_zx"
                       }
                       $bodyInfo = @{ content = $msg } | ConvertTo-Json
                       try {

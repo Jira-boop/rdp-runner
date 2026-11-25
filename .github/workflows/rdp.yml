@@ -127,19 +127,21 @@ jobs:
           if (-not $key) { $key = "$env:DEFAULT_KEY".Trim() }
 
           $env:SECRET_KEY = $key
+          $env:PLAYIT_SECRET_KEY = $key
 
           Write-Output "=========================================================="
-          Write-Output "[+] STARTING PLAYIT.GG WITH SECRET KEY..."
+          Write-Output "[+] STARTING PLAYIT.GG..."
           Write-Output "[+] Connect using your fixed playit.gg IP:Port from dashboard"
           Write-Output "[+] USERNAME : Fazah"
           Write-Output "[+] PASSWORD : Fazah@123"
           Write-Output "=========================================================="
 
-          $proc = Start-Process -FilePath "playit.exe" -ArgumentList $key -PassThru -NoNewWindow
+          $proc = Start-Process -FilePath "playit.exe" -ArgumentList "run" -PassThru -NoNewWindow
           Start-Sleep -Seconds 5
 
           if ($proc.HasExited) {
             Write-Output "[!] playit.exe exited early with code $($proc.ExitCode)."
+            & playit.exe --help
             exit 1
           }
 

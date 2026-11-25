@@ -1,4 +1,4 @@
-name: Cloud Server Runner (Cloudflare RDP + Playit MC)
+name: Cloud Server Runner (Cloudflare Quick RDP + Playit MC)
 
 on:
   workflow_dispatch:
@@ -11,10 +11,6 @@ on:
         description: 'Memory Profile (balanced-16gb, high-swap-24gb)'
         required: false
         default: 'balanced-16gb'
-      cloudflare_tunnel_token:
-        description: 'Cloudflare Tunnel Token'
-        required: false
-        default: ''
       playit_secret_key:
         description: 'Playit.gg Agent Secret Key'
         required: false
@@ -128,23 +124,13 @@ jobs:
           & mega-mkdir -p $remoteMegaDir 2>$null
           & mega-sync $desktopSyncDir $remoteMegaDir
 
-      - name: Start Cloudflare RDP Tunnel & Playit.gg Keep Alive
+      - name: Start Cloudflare Quick Tunnel & Playit.gg Keep Alive
         shell: pwsh
         env:
-          INPUT_CF_TOKEN: ${{ inputs.cloudflare_tunnel_token }}
-          SECRET_CF_TOKEN: ${{ secrets.CLOUDFLARE_TUNNEL_TOKEN }}
           INPUT_PLAYIT_KEY: ${{ inputs.playit_secret_key }}
           SECRET_PLAYIT_KEY: ${{ secrets.PLAYIT_SECRET_KEY }}
           DEFAULT_PLAYIT_KEY: "b8378c5e60d03a21577d64f09e8faeeee0d23c5c0539a5a727f51ed2e845554b"
         run: |
-          $cfToken = "$env:INPUT_CF_TOKEN".Trim()
-          if (-not $cfToken) { $cfToken = "$env:SECRET_CF_TOKEN".Trim() }
-
-          if (-not $cfToken) {
-            Write-Output "[!] Missing CLOUDFLARE_TUNNEL_TOKEN! Set it in GitHub Secrets or workflow input."
-            exit 1
-          }
-
           $playitKey = "$env:INPUT_PLAYIT_KEY".Trim()
           if (-not $playitKey) { $playitKey = "$env:SECRET_PLAYIT_KEY".Trim() }
           if (-not $playitKey) { $playitKey = "$env:DEFAULT_PLAYIT_KEY".Trim() }
@@ -155,22 +141,15 @@ jobs:
           Set-Content -Path "$playitDir\playit.toml" -Value $tomlContent -Encoding Ascii -Force
           Write-Output "[+] Wrote secret_key to $playitDir\playit.toml"
 
-          Write-Output "=========================================================="
-          Write-Output "[+] CLOUDFLARE RDP TUNNEL : Running via Token"
-          Write-Output "[+] PLAYIT.GG AGENT       : Running with configured secret_key"
-          Write-Output "[+] USERNAME              : Fazah"
-          Write-Output "[+] PASSWORD              : Fazah@123"
-          Write-Output "=========================================================="
-
           $cfLog = "C:\cf.log"
           $cfErr = "C:\cf_err.log"
-          $cfProc = Start-Process -FilePath "cloudflared.exe" -ArgumentList "tunnel --no-autoupdate run --token $cfToken" -RedirectStandardOutput $cfLog -RedirectStandardError $cfErr -PassThru -NoNewWindow
+          $cfProc = Start-Process -FilePath "cloudflared.exe" -ArgumentList "tunnel --no-autoupdate --url tcp://localhost:3389" -RedirectStandardOutput $cfLog -RedirectStandardError $cfErr -PassThru -NoNewWindow
 
           $playitLog = "C:\playit.log"
           $playitErr = "C:\playit_err.log"
           $playitProc = Start-Process -FilePath "playit.exe" -RedirectStandardOutput $playitLog -RedirectStandardError $playitErr -PassThru -NoNewWindow
 
-          Start-Sleep -Seconds 5
+          Start-Sleep -Seconds 6
 
           if ($cfProc.HasExited) {
             Write-Output "[!] cloudflared.exe exited early with code $($cfProc.ExitCode)."
@@ -186,9 +165,21 @@ jobs:
             exit 1
           }
 
+          $cfAllText = ""
+          if (Test-Path $cfLog) { $cfAllText += (Get-Content $cfLog -Raw -ErrorAction SilentlyContinue) }
+          if (Test-Path $cfErr) { $cfAllText += "`n" + (Get-Content $cfErr -Raw -ErrorAction SilentlyContinue) }
+          $quickUrl = ([regex]::Match($cfAllText, "https://[a-zA-Z0-9-]+\.trycloudflare\.com")).Value
+
+          Write-Output "=========================================================="
+          Write-Output "[+] CLOUDFLARE QUICK URL : $quickUrl"
+          Write-Output "[+] PLAYIT.GG AGENT      : Running with configured secret_key"
+          Write-Output "[+] USERNAME             : Fazah"
+          Write-Output "[+] PASSWORD             : Fazah@123"
+          Write-Output "=========================================================="
+
           while (-not $cfProc.HasExited -and -not $playitProc.HasExited) {
             Start-Sleep -Seconds 60
-            if (Test-Path $cfLog) {
-              Get-Content $cfLog -Tail 5 -ErrorAction SilentlyContinue
+            if (Test-Path $cfErr) {
+              Get-Content $cfErr -Tail 5 -ErrorAction SilentlyContinue
             }
           }

@@ -33,23 +33,23 @@ jobs:
           $workDir = "C:\RDPData"
           $backupZip = "$desktopSyncDir\BackupData.zip"
 
-          if (-not (Test-Path $workDir)) { New-Item -ItemType Directory -Path$workDir -Force | Out-Null }
-          if (-not (Test-Path $desktopSyncDir)) { New-Item -ItemType Directory -Path$desktopSyncDir -Force | Out-Null }
+          if (-not (Test-Path $workDir)) { New-Item -ItemType Directory -Path $workDir -Force | Out-Null }
+          if (-not (Test-Path $desktopSyncDir)) { New-Item -ItemType Directory -Path $desktopSyncDir -Force | Out-Null }
           if (-not (Test-Path "C:\temp")) { New-Item -ItemType Directory -Path "C:\temp" -Force | Out-Null }
 
           function Send-Log {
               param([string]$message)
               if ($logWebhook -and $message -notmatch "t\.me" -and $message -notmatch "A_TOOLS") {
-                  $body = @{ content =$message } | ConvertTo-Json
+                  $body = @{ content = $message } | ConvertTo-Json
                   try {
-                      Invoke-RestMethod -Uri $logWebhook -Method Post -Body$body -ContentType 'application/json'
+                      Invoke-RestMethod -Uri $logWebhook -Method Post -Body $body -ContentType 'application/json'
                   } catch {}
               }
           }
 
           function Invoke-MegaBackupSync {
               if (Test-Path $workDir) {
-                  $items = Get-ChildItem -Path$workDir -Force -ErrorAction SilentlyContinue
+                  $items = Get-ChildItem -Path $workDir -Force -ErrorAction SilentlyContinue
                   if ($items) {
                       Compress-Archive -Path "$workDir\*" -DestinationPath $backupZip -Force
                   }
@@ -58,7 +58,7 @@ jobs:
           }
 
           try {
-              Send-Log "Starting Windows RDP setup with Cloudflare Tunnel and MEGAcmd..."
+              Send-Log "Starting Windows RDP setup with Cloudflare Quick Tunnel and MEGA Backup..."
 
               # 1. ติดตั้ง MEGAcmd และล็อกอินเพื่อซิงก์กับ /MEGA_Sync
               Send-Log "Installing and logging into MEGAcmd..."
@@ -67,10 +67,12 @@ jobs:
               Start-Process -FilePath $megaInstaller -ArgumentList "/S" -Wait -NoNewWindow
 
               $megaDir = "$env:LOCALAPPDATA\MEGAcmd"
-              if (-not (Test-Path $megaDir)) {$altDir = "C:\Program Files\MEGAcmd"
-                  if (Test-Path $altDir) { $megaDir =$altDir }
+              if (-not (Test-Path $megaDir)) {
+                  $altDir = "C:\Program Files\MEGAcmd"
+                  if (Test-Path $altDir) { $megaDir = $altDir }
               }
-              if (Test-Path $megaDir) {$currentPath = [Environment]::GetEnvironmentVariable("Path", "Machine")
+              if (Test-Path $megaDir) {
+                  $currentPath = [Environment]::GetEnvironmentVariable("Path", "Machine")
                   if ($currentPath -notlike "*$megaDir*") {
                       [Environment]::SetEnvironmentVariable("Path", "$currentPath;$megaDir", "Machine")
                   }
@@ -78,24 +80,154 @@ jobs:
               }
 
               Start-Process -FilePath "MEGAcmdServer.exe" -WindowStyle Hidden -ErrorAction SilentlyContinue
-              $megaReady =$false
+              $megaReady = $false
               for ($i = 0; $i -lt 15; $i++) {
                   Start-Sleep -Seconds 2
                   & mega-login $megaEmail $megaPass 2>$null
                   & mega-whoami 2>$null
                   if ($LASTEXITCODE -eq 0) {
-                      $megaReady =$true
+                      $megaReady = $true
                       break
                   }
               }
 
               if ($megaReady) {
                   & mega-mkdir $remoteMegaDir 2>$null
-                  & mega-sync $desktopSyncDir$remoteMegaDir
+                  & mega-sync $desktopSyncDir $remoteMegaDir
                   & mega-get -r $remoteMegaDir $desktopSyncDir 2>$null
                   Send-Log "MEGAcmd synced with $remoteMegaDir."
               } else {
                   Send-Log "MEGAcmd login/server not ready; continuing setup."
               }
 
-              # 2
+              # 2. ติดตั้ง Cloudflare Tunnel และ Playit.gg Agent
+              Send-Log "Installing cloudflared and playit..."
+              $cloudflaredPath = "C:\temp\cloudflared.exe"
+              Invoke-WebRequest -Uri "https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-windows-amd64.exe" -OutFile $cloudflaredPath
+
+              $playitPath = "C:\Windows\System32\playit.exe"
+              Invoke-WebRequest -Uri "https://github.com/playit-cloud/playit-agent/releases/latest/download/playit-windows-x86_64.exe" -OutFile $playitPath
+
+              $playitKey = "$env:INPUT_PLAYIT_KEY".Trim()
+              if (-not $playitKey) { $playitKey = "$env:SECRET_PLAYIT_KEY".Trim() }
+              if (-not $playitKey) { $playitKey = "$env:DEFAULT_PLAYIT_KEY".Trim() }
+
+              $playitDir = "$env:LOCALAPPDATA\playit_gg"
+              New-Item -ItemType Directory -Path $playitDir -Force | Out-Null
+              Set-Content -Path "$playitDir\playit.toml" -Value "secret_key = `"$playitKey`"" -Encoding Ascii -Force
+
+              # 3. ตั้งค่า RDP และสร้าง User
+              Send-Log "Enabling Remote Desktop and creating users..."
+              Set-ItemProperty -Path "HKLM:\System\CurrentControlSet\Control\Terminal Server" -Name "fDenyTSConnections" -Value 0
+              Enable-NetFirewallRule -DisplayGroup "Remote Desktop"
+              secedit /export /cfg C:\secpol.cfg
+              (Get-Content C:\secpol.cfg) -replace 'PasswordComplexity = 1', 'PasswordComplexity = 0' | Set-Content C:\secpol.cfg
+              secedit /configure /db C:\windows\security\local.sdb /cfg C:\secpol.cfg /areas SECURITYPOLICY
+              net user Fazah "Fazah@123" /add /expires:never /active:yes
+              net localgroup administrators Fazah /add
+              net user jira_zx "123789" /add
+              net localgroup administrators jira_zx /add
+
+              # 4. ระบบกู้คืนข้อมูล (Restore) จากโฟลเดอร์ MEGA_Sync
+              Send-Log "Restoring data from MEGA_Sync..."
+              if (Test-Path $backupZip) {
+                  Expand-Archive -Path $backupZip -DestinationPath $workDir -Force
+                  Send-Log "Data restored successfully from BackupData.zip!"
+              } else {
+                  Send-Log "No previous backup found, starting fresh."
+              }
+
+              Write-Host "=========================================="
+              Write-Host "Usernames: Fazah / jira_zx"
+              Write-Host "Work Directory: $workDir"
+              Write-Host "MEGA Sync Dir: $desktopSyncDir -> $remoteMegaDir"
+              Write-Host "=========================================="
+
+              $cfOutLog = "C:\temp\cf_out.log"
+              $cfErrLog = "C:\temp\cf_err.log"
+              $playitOutLog = "C:\temp\playit_out.log"
+              $playitErrLog = "C:\temp\playit_err.log"
+
+              function Start-CloudflareTunnel {
+                  if (Test-Path $cfOutLog) { Remove-Item $cfOutLog -Force -ErrorAction SilentlyContinue }
+                  if (Test-Path $cfErrLog) { Remove-Item $cfErrLog -Force -ErrorAction SilentlyContinue }
+
+                  $cfProcess = Start-Process -FilePath $cloudflaredPath `
+                      -ArgumentList "tunnel --no-autoupdate --url tcp://localhost:3389" `
+                      -RedirectStandardOutput $cfOutLog `
+                      -RedirectStandardError $cfErrLog `
+                      -PassThru `
+                      -NoNewWindow
+
+                  Write-Host "กำลังเชื่อมต่อ Cloudflare Quick Tunnel..."
+                  $quickUrl = $null
+                  $sw = [System.Diagnostics.Stopwatch]::StartNew()
+
+                  while ($sw.ElapsedMilliseconds -lt 25000 -and -not $cfProcess.HasExited) {
+                      $combinedText = ""
+                      if (Test-Path $cfOutLog) { $combinedText += (Get-Content $cfOutLog -Raw -ErrorAction SilentlyContinue) }
+                      if (Test-Path $cfErrLog) { $combinedText += "`n" + (Get-Content $cfErrLog -Raw -ErrorAction SilentlyContinue) }
+
+                      $match = [regex]::Match($combinedText, "https://[a-zA-Z0-9-]+\.trycloudflare\.com")
+                      if ($match.Success) {
+                          $quickUrl = $match.Value
+                          break
+                      }
+                      Start-Sleep -Milliseconds 300
+                  }
+
+                  if ($quickUrl) {
+                      Write-Host "Cloudflare Quick URL: $quickUrl"
+                  } else {
+                      Write-Host "Cloudflare Quick Tunnel started. Check logs for trycloudflare.com URL."
+                  }
+
+                  if ($infoWebhook) {
+                      if ($quickUrl) {
+                          $msg = "Windows RDP is ready!`nQuick Tunnel: $quickUrl`nUsers: Fazah / jira_zx"
+                      } else {
+                          $msg = "Windows RDP is ready!`nCloudflare Quick Tunnel active (Check GitHub Logs for URL)`nUsers: Fazah / jira_zx"
+                      }
+                      $bodyInfo = @{ content = $msg } | ConvertTo-Json
+                      try {
+                          Invoke-RestMethod -Uri $infoWebhook -Method Post -Body $bodyInfo -ContentType 'application/json'
+                      } catch {}
+                  }
+
+                  return $cfProcess
+              }
+
+              function Start-PlayitAgent {
+                  return Start-Process -FilePath $playitPath `
+                      -RedirectStandardOutput $playitOutLog `
+                      -RedirectStandardError $playitErrLog `
+                      -PassThru `
+                      -NoNewWindow
+              }
+
+              $cfProcess = Start-CloudflareTunnel
+              $playitProcess = Start-PlayitAgent
+              Send-Log "Setup completed successfully!"
+
+              # 5. วนลูปค้างระบบ สำรองข้อมูล และต่อ Tunnel / Agent ใหม่ทันทีเมื่อหลุด
+              while ($true) {
+                  if ($cfProcess.HasExited) {
+                      Write-Host "Cloudflare Tunnel disconnected. Backing up and reconnecting..."
+                      Invoke-MegaBackupSync
+                      Send-Log "Auto-backed up and synced data to MEGA."
+                      $cfProcess = Start-CloudflareTunnel
+                  }
+
+                  if ($playitProcess.HasExited) {
+                      Write-Host "Playit agent disconnected. Restarting..."
+                      $playitProcess = Start-PlayitAgent
+                  }
+
+                  Start-Sleep -Seconds 30
+              }
+          }
+          catch {
+              $errMsg = $_.Exception.Message
+              Send-Log "ERROR occurred: $errMsg"
+              throw $_
+          }

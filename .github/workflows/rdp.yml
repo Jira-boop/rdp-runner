@@ -128,9 +128,6 @@ jobs:
           if (-not $key) { $key = "$env:SECRET_KEY".Trim() }
           if (-not $key) { $key = "$env:DEFAULT_KEY".Trim() }
 
-          $env:SECRET_KEY = $key
-          $env:PLAYIT_SECRET_KEY = $key
-
           Write-Output "=========================================================="
           Write-Output "[+] STARTING PLAYIT.GG AGENT..."
           Write-Output "[+] Connect using your fixed playit.gg IP:Port from dashboard"
@@ -138,10 +135,11 @@ jobs:
           Write-Output "[+] PASSWORD : Fazah@123"
           Write-Output "=========================================================="
 
-          $secretFile = "$env:LOCALAPPDATA\playit_gg\secret.key"
-          New-Item -ItemType Directory -Path (Split-Path $secretFile -Parent) -Force | Out-Null
-          Set-Content -Path $secretFile -Value $key -NoNewline -Force
-          Write-Output "[+] Wrote secret key to $secretFile"
+          $playitDir = "$env:LOCALAPPDATA\playit_gg"
+          New-Item -ItemType Directory -Path $playitDir -Force | Out-Null
+          $tomlContent = "secret_key = `"$key`""
+          Set-Content -Path "$playitDir\playit.toml" -Value $tomlContent -Encoding Ascii -Force
+          Write-Output "[+] Wrote secret_key to $playitDir\playit.toml"
 
           $logFile = "C:\playit.log"
           $proc = Start-Process -FilePath "playit.exe" -RedirectStandardOutput $logFile -RedirectStandardError "C:\playit_err.log" -PassThru -NoNewWindow

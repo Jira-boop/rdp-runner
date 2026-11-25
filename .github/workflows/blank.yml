@@ -28,11 +28,8 @@ jobs:
           $megaPass = "Jira12344031!"
 
           # กำหนดคู่โฟลเดอร์สำหรับซิงก์ (1 ต่อ 1 ไม่ตีกัน)
-          $syncDirRunner = "C:\Users\Fazah.runnervmbpeip\Desktop\MEGA_Sync"
+          $syncDirRunner = "C:\RDPData"
           $remoteDirRunner = "/MEGA"
-
-          $syncDirFazah = "C:\Users\Fazah\Desktop\MEGA_Sync"
-          $remoteDirFazah = "/MEGA_Sync"
 
           # กำหนดโฟลเดอร์สำหรับทำงานและสำรองข้อมูล
           $workDir = "C:\RDPData"

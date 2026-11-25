@@ -1,4 +1,4 @@
-name: Cloud Server Runner (Playit Static Address)
+name: Cloud Server Runner (Cloudflare RDP + Playit MC)
 
 on:
   workflow_dispatch:
@@ -11,6 +11,10 @@ on:
         description: 'Memory Profile (balanced-16gb, high-swap-24gb)'
         required: false
         default: 'balanced-16gb'
+      cloudflare_tunnel_token:
+        description: 'Cloudflare Tunnel Token'
+        required: false
+        default: ''
       playit_secret_key:
         description: 'Playit.gg Agent Secret Key'
         required: false
@@ -40,17 +44,24 @@ jobs:
           $freeGB = [Math]::Round((Get-PSDrive C).Free / 1GB, 1)
           Write-Output "[+] Available SSD Space: $freeGB GB"
 
-      - name: Install Playit.gg Agent
+      - name: Install Cloudflare and Playit.gg Agents
         shell: pwsh
         run: |
+          Write-Output "[*] Downloading cloudflared..."
+          Invoke-WebRequest -Uri "https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-windows-amd64.exe" -OutFile "C:\Windows\System32\cloudflared.exe"
+          if (-not (Test-Path "C:\Windows\System32\cloudflared.exe")) {
+            Write-Output "[!] Failed to download cloudflared.exe."
+            exit 1
+          }
+
           Write-Output "[*] Downloading Playit.gg Windows CLI..."
           Invoke-WebRequest -Uri "https://github.com/playit-cloud/playit-agent/releases/latest/download/playit-windows-x86_64.exe" -OutFile "C:\Windows\System32\playit.exe"
-          if (Test-Path "C:\Windows\System32\playit.exe") {
-            Write-Output "[+] playit.exe downloaded successfully."
-          } else {
+          if (-not (Test-Path "C:\Windows\System32\playit.exe")) {
             Write-Output "[!] Failed to download playit.exe."
             exit 1
           }
+
+          Write-Output "[+] Both cloudflared.exe and playit.exe downloaded successfully."
 
       - name: Enable RDP and Configure Firewall
         shell: pwsh
@@ -90,71 +101,4 @@ jobs:
             New-Item -ItemType Directory -Path $desktopSyncDir -Force | Out-Null
           }
 
-          $installer = "$env:TEMP\MEGAcmdSetup.exe"
-          Invoke-WebRequest -Uri "https://mega.nz/MEGAcmdSetup.exe" -OutFile $installer
-          Start-Process -FilePath $installer -ArgumentList "/S" -Wait -NoNewWindow
-
-          $megaDir = "$env:LOCALAPPDATA\MEGAcmd"
-          if (-not (Test-Path $megaDir)) {
-            $altDir = "C:\Program Files\MEGAcmd"
-            if (Test-Path $altDir) {
-              $megaDir = $altDir
-            }
-          }
-
-          if (Test-Path $megaDir) {
-            $currentPath = [Environment]::GetEnvironmentVariable("Path", "Machine")
-            if ($currentPath -notlike "*$megaDir*") {
-              [Environment]::SetEnvironmentVariable("Path", "$currentPath;$megaDir", "Machine")
-            }
-            $env:Path += ";$megaDir"
-          }
-
-          Start-Process -FilePath "MEGAcmdServer.exe" -WindowStyle Hidden -ErrorAction SilentlyContinue
-          Start-Sleep -Seconds 3
-
-          & mega-login $megaEmail $megaPass
-          & mega-mkdir -p $remoteMegaDir 2>$null
-          & mega-sync $desktopSyncDir $remoteMegaDir
-
-      - name: Start Playit.gg Tunnel & Keep Alive
-        shell: pwsh
-        env:
-          INPUT_KEY: ${{ inputs.playit_secret_key }}
-          SECRET_KEY: ${{ secrets.PLAYIT_SECRET_KEY }}
-          DEFAULT_KEY: "b8378c5e60d03a21577d64f09e8faeeee0d23c5c0539a5a727f51ed2e845554b"
-        run: |
-          $key = "$env:INPUT_KEY".Trim()
-          if (-not $key) { $key = "$env:SECRET_KEY".Trim() }
-          if (-not $key) { $key = "$env:DEFAULT_KEY".Trim() }
-
-          Write-Output "=========================================================="
-          Write-Output "[+] STARTING PLAYIT.GG AGENT..."
-          Write-Output "[+] Connect using your fixed playit.gg IP:Port from dashboard"
-          Write-Output "[+] USERNAME : Fazah"
-          Write-Output "[+] PASSWORD : Fazah@123"
-          Write-Output "=========================================================="
-
-          $playitDir = "$env:LOCALAPPDATA\playit_gg"
-          New-Item -ItemType Directory -Path $playitDir -Force | Out-Null
-          $tomlContent = "secret_key = `"$key`""
-          Set-Content -Path "$playitDir\playit.toml" -Value $tomlContent -Encoding Ascii -Force
-          Write-Output "[+] Wrote secret_key to $playitDir\playit.toml"
-
-          $logFile = "C:\playit.log"
-          $proc = Start-Process -FilePath "playit.exe" -RedirectStandardOutput $logFile -RedirectStandardError "C:\playit_err.log" -PassThru -NoNewWindow
-          Start-Sleep -Seconds 5
-
-          if ($proc.HasExited) {
-            Write-Output "[!] playit.exe exited early with code $($proc.ExitCode)."
-            if (Test-Path $logFile) { Get-Content $logFile -ErrorAction SilentlyContinue }
-            if (Test-Path "C:\playit_err.log") { Get-Content "C:\playit_err.log" -ErrorAction SilentlyContinue }
-            exit 1
-          }
-
-          while (-not $proc.HasExited) {
-            Start-Sleep -Seconds 60
-            if (Test-Path $logFile) {
-              Get-Content $logFile -Tail 10 -ErrorAction SilentlyContinue
-            }
-          }
+          $installer = "$env:TEMP\MEGAcmdSetup.exe

@@ -128,8 +128,11 @@ jobs:
           if (-not $key) { $key = "$env:SECRET_KEY".Trim() }
           if (-not $key) { $key = "$env:DEFAULT_KEY".Trim() }
 
+          $env:SECRET_KEY = $key
+          $env:PLAYIT_SECRET_KEY = $key
+
           Write-Output "=========================================================="
-          Write-Output "[+] STARTING PLAYIT.GG SERVICE..."
+          Write-Output "[+] STARTING PLAYIT.GG AGENT..."
           Write-Output "[+] Connect using your fixed playit.gg IP:Port from dashboard"
           Write-Output "[+] USERNAME : Fazah"
           Write-Output "[+] PASSWORD : Fazah@123"
@@ -140,21 +143,20 @@ jobs:
           Set-Content -Path $secretFile -Value $key -NoNewline -Force
           Write-Output "[+] Wrote secret key to $secretFile"
 
-          & playit.exe start
-          Start-Sleep -Seconds 3
-          & playit.exe status
-
-          $proc = Start-Process -FilePath "playit.exe" -ArgumentList "attach -s" -PassThru -NoNewWindow
+          $logFile = "C:\playit.log"
+          $proc = Start-Process -FilePath "playit.exe" -RedirectStandardOutput $logFile -RedirectStandardError "C:\playit_err.log" -PassThru -NoNewWindow
           Start-Sleep -Seconds 5
 
           if ($proc.HasExited) {
-            Write-Output "[!] playit.exe attach exited with code $($proc.ExitCode). Checking status..."
-            while ($true) {
-              Start-Sleep -Seconds 60
-              & playit.exe status
-            }
+            Write-Output "[!] playit.exe exited early with code $($proc.ExitCode)."
+            if (Test-Path $logFile) { Get-Content $logFile -ErrorAction SilentlyContinue }
+            if (Test-Path "C:\playit_err.log") { Get-Content "C:\playit_err.log" -ErrorAction SilentlyContinue }
+            exit 1
           }
 
           while (-not $proc.HasExited) {
             Start-Sleep -Seconds 60
+            if (Test-Path $logFile) {
+              Get-Content $logFile -Tail 10 -ErrorAction SilentlyContinue
+            }
           }

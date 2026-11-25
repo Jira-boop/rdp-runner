@@ -1,4 +1,4 @@
-name: Windows RDP Cloudflare with Mega Backup
+name: ดด
 
 on:
   workflow_dispatch:

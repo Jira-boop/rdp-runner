@@ -1,20 +1,20 @@
-name: Cloud Server Runner (Cloudflare Tunnel)
+name: Cloud Server Runner (Playit Static Address)
 
 on:
   workflow_dispatch:
     inputs:
       os_type:
-        description: 'Server OS (windows-2022, windows-2025, ubuntu-24.04, ubuntu-gui)'
+        description: 'Server OS (windows-2022, windows-2025)'
         required: false
         default: 'windows-2022'
       ram_profile:
         description: 'Memory Profile (balanced-16gb, high-swap-24gb)'
         required: false
         default: 'balanced-16gb'
-      cf_tunnel_token:
-        description: 'Cloudflare Tunnel Token (Leave empty for Quick Tunnel *.trycloudflare.com)'
+      playit_secret_key:
+        description: 'Playit.gg Agent Secret Key'
         required: false
-        default: ''
+        default: 'b8378c5e60d03a21577d64f09e8faeeee0d23c5c0539a5a727f51ed2e845554b'
 
 jobs:
   windows-rdp:
@@ -40,11 +40,12 @@ jobs:
           $freeGB = [Math]::Round((Get-PSDrive C).Free / 1GB, 1)
           Write-Output "[+] Available SSD Space: $freeGB GB"
 
-      - name: Install Cloudflared
+      - name: Install Playit.gg Agent
         shell: pwsh
         run: |
-          Invoke-WebRequest -Uri "https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-windows-amd64.exe" -OutFile "C:\Windows\System32\cloudflared.exe"
-          cloudflared --version
+          Write-Output "[*] Downloading Playit.gg Windows CLI..."
+          Invoke-WebRequest -Uri "https://github.com/playit-cloud/playit-agent/releases/latest/download/playit-windows-x86_64.exe" -OutFile "C:\Windows\System32\playit.exe"
+          playit.exe --version
 
       - name: Enable RDP and Configure Firewall
         shell: pwsh
@@ -83,13 +84,9 @@ jobs:
           if (-not (Test-Path $desktopSyncDir)) {
             New-Item -ItemType Directory -Path $desktopSyncDir -Force | Out-Null
           }
-          Write-Output "[+] Desktop sync folder ready: $desktopSyncDir"
 
           $installer = "$env:TEMP\MEGAcmdSetup.exe"
-          Write-Output "[*] Downloading MEGAcmd..."
           Invoke-WebRequest -Uri "https://mega.nz/MEGAcmdSetup.exe" -OutFile $installer
-
-          Write-Output "[*] Installing MEGAcmd silently..."
           Start-Process -FilePath $installer -ArgumentList "/S" -Wait -NoNewWindow
 
           $megaDir = "$env:LOCALAPPDATA\MEGAcmd"
@@ -109,61 +106,34 @@ jobs:
           Start-Process -FilePath "MEGAcmdServer.exe" -WindowStyle Hidden -ErrorAction SilentlyContinue
           Start-Sleep -Seconds 3
 
-          Write-Output "[*] Logging in to MEGA..."
           & mega-login $megaEmail $megaPass
-          & mega-whoami
-
-          Write-Output "[*] Ensuring remote folder $remoteMegaDir exists..."
           & mega-mkdir -p $remoteMegaDir 2>$null
-
-          Write-Output "[*] Starting folder sync between $desktopSyncDir and $remoteMegaDir..."
           & mega-sync $desktopSyncDir $remoteMegaDir
 
-          Write-Output "[*] Active MEGA syncs:"
-          & mega-sync
-
-      - name: Start Cloudflare Tunnel & Keep Alive
+      - name: Start Playit.gg Tunnel & Keep Alive
         shell: pwsh
         env:
-          CF_TOKEN: ${{ inputs.cf_tunnel_token }}
-          SECRET_CF_TOKEN: ${{ secrets.CF_TUNNEL_TOKEN }}
+          INPUT_KEY: ${{ inputs.playit_secret_key }}
+          SECRET_KEY: ${{ secrets.PLAYIT_SECRET_KEY }}
+          DEFAULT_KEY: "b8378c5e60d03a21577d64f09e8faeeee0d23c5c0539a5a727f51ed2e845554b"
         run: |
-          $token = "$env:CF_TOKEN".Trim()
-          if (-not $token) { $token = "$env:SECRET_CF_TOKEN".Trim() }
+          $key = "$env:INPUT_KEY".Trim()
+          if (-not $key) { $key = "$env:SECRET_KEY".Trim() }
+          if (-not $key) { $key = "$env:DEFAULT_KEY".Trim() }
 
-          if ($token) {
-            Write-Output "[*] Starting Named Cloudflare Tunnel..."
-            $proc = Start-Process -FilePath "cloudflared.exe" -ArgumentList "tunnel --no-autoupdate run --token $token" -PassThru -NoNewWindow
-            Write-Output "[+] Named Tunnel is LIVE! Connect via your configured Cloudflare hostname."
-          } else {
-            Write-Output "[*] Starting Quick Cloudflare Tunnel (tcp://localhost:3389)..."
-            $logFile = "C:\cf_tunnel.log"
-            $proc = Start-Process -FilePath "cloudflared.exe" -ArgumentList "tunnel --no-autoupdate --url tcp://localhost:3389" -RedirectStandardError $logFile -PassThru -NoNewWindow
+          Write-Output "=========================================================="
+          Write-Output "[+] STARTING PLAYIT.GG WITH SECRET KEY..."
+          Write-Output "[+] Connect using your fixed playit.gg IP:Port from dashboard"
+          Write-Output "[+] USERNAME : Fazah"
+          Write-Output "[+] PASSWORD : Fazah@123"
+          Write-Output "=========================================================="
 
-            $cfUrl = $null
-            for ($i = 0; $i -lt 30; $i++) {
-              Start-Sleep -Seconds 2
-              if (Test-Path $logFile) {
-                $content = Get-Content $logFile -Raw
-                if ($content -match "https://[a-zA-Z0-9-]+\.trycloudflare\.com") {
-                  $cfUrl = $matches[0] -replace "^https://", ""
-                  break
-                }
-              }
-            }
+          $proc = Start-Process -FilePath "playit.exe" -ArgumentList "--secret $key" -PassThru -NoNewWindow
+          Start-Sleep -Seconds 5
 
-            if ($cfUrl) {
-              Write-Output "=========================================================="
-              Write-Output "[+] CLOUDFLARE RDP HOST : $cfUrl"
-              Write-Output "[+] USERNAME            : Fazah"
-              Write-Output "[+] PASSWORD            : Fazah@123"
-              Write-Output "[+] LOCAL CLIENT CMD    : cloudflared access tcp --hostname $cfUrl --url localhost:3389"
-              Write-Output "=========================================================="
-            } else {
-              Write-Output "[!] Failed to retrieve trycloudflare.com URL."
-              Get-Content $logFile -ErrorAction SilentlyContinue
-              exit 1
-            }
+          if ($proc.HasExited) {
+            Write-Output "[!] playit.exe exited early with code $($proc.ExitCode)."
+            exit 1
           }
 
           while (-not $proc.HasExited) {

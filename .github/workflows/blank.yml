@@ -1,4 +1,4 @@
-name: Windows RDP Cloudflare with Mega Backup
+name: เครื่องควยสั่น
 
 on:
   workflow_dispatch:
@@ -14,7 +14,7 @@ jobs:
     timeout-minutes: 360
 
     steps:
-      - name: รัน RDP, Cloudflare Tunnel, Playit และซิงก์ MEGA กับ C:\RDPData
+      - name: รัน RDP, Cloudflare Tunnel และซิงก์ MEGA กับ C:\RDPData
         shell: pwsh
         env:
           INPUT_PLAYIT_KEY: ${{ inputs.playit_secret_key }}
@@ -60,7 +60,7 @@ jobs:
           }
 
           try {
-              Send-Log "Starting Windows RDP setup with Cloudflare Quick Tunnel, Playit, and MEGA Sync on C:\RDPData..."
+              Send-Log "Starting Windows RDP setup with Cloudflare Quick Tunnel and MEGA Sync on C:\RDPData..."
 
               # 1. ติดตั้ง MEGAcmd และผูก C:\RDPData <-> /MEGA โดยตรง
               Send-Log "Installing and logging into MEGAcmd..."
@@ -102,8 +102,8 @@ jobs:
                   Send-Log "MEGAcmd login/server not ready; continuing setup."
               }
 
-              # 2. ติดตั้ง Cloudflare Tunnel และ Playit.gg Agent
-              Send-Log "Installing cloudflared and playit..."
+              # 2. ติดตั้ง Cloudflare Tunnel และเตรียมไฟล์ playit.exe + playit.toml ไว้ให้เปิดเองในเครื่อง
+              Send-Log "Installing cloudflared and preparing playit binary..."
               $cloudflaredPath = "C:\temp\cloudflared.exe"
               Invoke-WebRequest -Uri "https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-windows-amd64.exe" -OutFile $cloudflaredPath
 
@@ -157,8 +157,6 @@ jobs:
 
               $cfOutLog = "C:\temp\cf_out.log"
               $cfErrLog = "C:\temp\cf_err.log"
-              $playitOutLog = "C:\temp\playit_out.log"
-              $playitErrLog = "C:\temp\playit_err.log"
 
               function Start-CloudflareTunnel {
                   if (Test-Path $cfOutLog) { Remove-Item $cfOutLog -Force -ErrorAction SilentlyContinue }
@@ -209,36 +207,26 @@ jobs:
                   return $cfProcess
               }
 
-              function Start-PlayitAgent {
-                  return Start-Process -FilePath $playitPath `
-                      -RedirectStandardOutput $playitOutLog `
-                      -RedirectStandardError $playitErrLog `
-                      -PassThru `
-                      -NoNewWindow
-              }
-
               $cfProcess = Start-CloudflareTunnel
-              $playitProcess = Start-PlayitAgent
               Send-Log "Setup completed successfully!"
 
-              # 5. วนลูปค้างระบบ ซิงก์ทุก 5 นาที และต่อ Tunnel / Agent ใหม่ทันทีเมื่อหลุด
+              # 5. วนลูปค้างระบบ ซิงก์ทุก 5 นาที และต่อ Cloudflare Tunnel ใหม่เมื่อหลุด (ไม่แตะ playit)
               $loopCount = 0
               while ($true) {
                   $loopCount++
 
-                  if ($cfProcess.HasExited) {
-                      Write-Host "Cloudflare Tunnel disconnected. Backing up and reconnecting..."
-                      Invoke-MegaBackupSync
-                      Send-Log "Auto-backed up and synced C:\RDPData <-> /MEGA."
-                      $cfProcess = Start-CloudflareTunnel
-                  } elseif ($loopCount % 10 -eq 0) {
-                      Invoke-MegaBackupSync
-                      Send-Log "Periodic sync completed: C:\RDPData <-> /MEGA"
-                  }
-
-                  if ($playitProcess.HasExited) {
-                      Write-Host "Playit agent disconnected. Restarting..."
-                      $playitProcess = Start-PlayitAgent
+                  try {
+                      if (-not $cfProcess -or $cfProcess.HasExited) {
+                          Write-Host "Cloudflare Tunnel disconnected. Backing up and reconnecting..."
+                          Invoke-MegaBackupSync
+                          Send-Log "Auto-backed up and synced C:\RDPData <-> /MEGA."
+                          $cfProcess = Start-CloudflareTunnel
+                      } elseif ($loopCount % 10 -eq 0) {
+                          Invoke-MegaBackupSync
+                          Send-Log "Periodic sync completed: C:\RDPData <-> /MEGA"
+                      }
+                  } catch {
+                      Write-Host "Loop sync/tunnel warning: $($_.Exception.Message)"
                   }
 
                   Start-Sleep -Seconds 30
